@@ -25,6 +25,9 @@ function setupSchema() {
   ensureSheetWithHeaders_(ss, SHEET.AUDIT_LOG, COLS.AUDIT_LOG);
   ensureSheetWithHeaders_(ss, SHEET.VALIDATION_LOG, COLS.VALIDATION_LOG);
   ensureSheetWithHeaders_(ss, SHEET.IMPORT_LOG, COLS.IMPORT_LOG);
+  ensureSheetWithHeaders_(ss, SHEET.ESCALATIONS, COLS.ESCALATIONS);
+  ensureSheetWithHeaders_(ss, SHEET.NOTIFICATION_LOG, COLS.NOTIFICATION_LOG);
+  ensureSheetWithHeaders_(ss, SHEET.OFFICE_CONTACTS, COLS.OFFICE_CONTACTS);
 
   applyKpiSheetValidation_(ss);
 
@@ -94,23 +97,37 @@ function applyKpiSheetValidation_(ss) {
   const colMap = headerIndexMap_(sheet);
   const maxRows = 2000; // headroom for growth; re-run setupSchema() after expanding
 
-  const dropdowns = [
+  // Strict dropdowns: the real workbook only ever uses these exact values,
+  // so blocking anything else catches typos early.
+  const strictDropdowns = [
     ['KRA Type', KRA_TYPES],
-    ['Metric Type', METRIC_TYPES],
     ['Indicator Nature', INDICATOR_NATURES],
     ['Measurement Nature', MEASUREMENT_NATURES],
-    ['Frequency', FREQUENCIES],
     ['Goal Role', GOAL_ROLES],
     ['Q1 Status', [RAG.GREEN, RAG.AMBER, RAG.RED, RAG.GREY]],
     ['Q2 Status', [RAG.GREEN, RAG.AMBER, RAG.RED, RAG.GREY]],
     ['Q3 Status', [RAG.GREEN, RAG.AMBER, RAG.RED, RAG.GREY]],
     ['Q4 Status', [RAG.GREEN, RAG.AMBER, RAG.RED, RAG.GREY]]
   ];
-
-  dropdowns.forEach(function (pair) {
+  strictDropdowns.forEach(function (pair) {
     const col = colMap[pair[0]];
     if (!col) return;
     const rule = SpreadsheetApp.newDataValidation().requireValueInList(pair[1], true).setAllowInvalid(false).build();
+    sheet.getRange(2, col, maxRows, 1).setDataValidation(rule);
+  });
+
+  // Suggestion-only dropdowns: the real workbook already uses more values
+  // than a clean enum (e.g. Frequency has "Per exam cycle", "Per intake" ...),
+  // and future years may add more, so these show a picker but don't block
+  // typing something else in.
+  const permissiveDropdowns = [
+    ['Metric Type', METRIC_TYPES],
+    ['Frequency', FREQUENCIES]
+  ];
+  permissiveDropdowns.forEach(function (pair) {
+    const col = colMap[pair[0]];
+    if (!col) return;
+    const rule = SpreadsheetApp.newDataValidation().requireValueInList(pair[1], true).setAllowInvalid(true).build();
     sheet.getRange(2, col, maxRows, 1).setDataValidation(rule);
   });
 }

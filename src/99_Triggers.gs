@@ -32,9 +32,16 @@ function onEdit(e) {
   const ss = e.source;
   logAudit_(ss, SHEET.KPIS, e.range.getRow(), fieldName, e.oldValue, e.value);
 
+  const office = sheet.getRange(e.range.getRow(), map['Office']).getValue();
+
   if (fieldName === 'Wt (%)') {
-    const office = sheet.getRange(e.range.getRow(), map['Office']).getValue();
     checkOfficeWeightNow_(ss, sheet, map, office);
+  }
+
+  const statusQuarter = /^(Q[1-4]) Status$/.exec(fieldName);
+  if (statusQuarter && e.value === RAG.RED) {
+    const kpiId = sheet.getRange(e.range.getRow(), map['KPI_ID']).getValue();
+    notifyOnStatusChange_(ss, kpiId, office, statusQuarter[1], e.value);
   }
 }
 

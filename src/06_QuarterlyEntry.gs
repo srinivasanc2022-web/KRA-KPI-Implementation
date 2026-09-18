@@ -6,7 +6,7 @@
  * enter Q1-Q4 actuals, trigger RAG status, and log ATR notes when a quarter
  * is Amber/Red."
  *
- * All writes go through submitQuarterlyActual_() so RAG computation, the
+ * All writes go through submitQuarterlyActual() so RAG computation, the
  * ATR-required-on-Amber/Red rule, and the audit log stay in one place rather
  * than being re-implemented per caller.
  */
@@ -75,6 +75,11 @@ function submitQuarterlyActual(kpiId, quarter, actualValue, atrText) {
     logAudit_(ss, SHEET.KPIS, rowNum, quarter + ' ATR', oldAtr, atrText);
   }
 
+  if (status === RAG.RED) {
+    const office = sheet.getRange(rowNum, map['Office']).getValue();
+    notifyOnStatusChange_(ss, kpiId, office, quarter, status);
+  }
+
   return { ok: true, status: status || '(unit requires manual status)', message: 'Saved.' };
 }
 
@@ -98,6 +103,11 @@ function submitManualStatus(kpiId, quarter, statusValue, atrText) {
     const oldAtr = sheet.getRange(rowNum, map[quarter + ' ATR']).getValue();
     sheet.getRange(rowNum, map[quarter + ' ATR']).setValue(atrText);
     logAudit_(ss, SHEET.KPIS, rowNum, quarter + ' ATR', oldAtr, atrText);
+  }
+
+  if (statusValue === RAG.RED) {
+    const office = sheet.getRange(rowNum, map['Office']).getValue();
+    notifyOnStatusChange_(ss, kpiId, office, quarter, statusValue);
   }
 
   return { ok: true, message: 'Saved.' };

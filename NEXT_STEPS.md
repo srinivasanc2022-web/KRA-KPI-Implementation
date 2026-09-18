@@ -1,62 +1,87 @@
-# What's built vs. what's next
+# What's built, and what still needs real eyes on it
 
-This pass covers **phases 1–2** of the build plan (data model + import
-pipeline, core CRUD/quarterly entry flow). Phases 3–7 are not built yet.
+All seven phases of the build plan now have a working implementation. This
+document is the honest list of what's genuinely solid vs. what's a
+first-pass approximation that needs to be checked against how the
+university actually wants these numbers to work.
 
-## Built in this pass
+## Built and validated against real data
 
-- Canonical data model for Pillars → Goals → Clusters → Offices → Verticals →
-  KRAs → KPIs, with the full KPI field set (spec section 3.7), the
-  Actions/milestone layer schema (3.8), and a genuine many-to-many
-  KPI↔Office co-ownership table (section 4/12).
-- Import pipeline that reads `01_Index`, `03_Strategic_Pillars`,
-  `04_Cascade_Map`, the five Tier 0/1 scorecards, and every Tier 2 office
-  sheet `01_Index` lists — by header name, tolerant of the known
-  blank-header-row quirk.
-- A placeholder sample-data fixture (`02_SampleData.gs`) so the importer is
-  testable without the real workbook. **This is not real data** — see
-  `README.md`.
-- Office/Cluster weight-sum-to-100 validation, and Goal-level owner-weight
-  presence validation, logged to `Validation_Log`.
-- RAG status computation (Green ≥95% / Amber 80–94% / Red <80% / Grey =
-  no actual) with configurable thresholds and a manual-entry fallback for
-  Band/Grade-unit KPIs.
-- Quarterly Entry sidebar for KPI Owners: pick office → KPI → quarter, enter
-  Actual (or manual Status for non-numeric units), server enforces "ATR
-  required when Amber/Red" before saving.
-- Audit logging of edits to targets/weights/owners/status, both from the
-  entry form and from direct in-sheet edits (`onEdit` trigger).
+- **Data model & import** (phases 1-2): canonical Pillars/Goals/Clusters/
+  Offices/Verticals/KRAs/KPIs, full spec §3.7 KPI field set, Actions/
+  milestone schema, many-to-many KPI↔Office co-ownership. Import pipeline
+  reads the real 39-sheet workbook by header name (normalized, alias-mapped)
+  and has been checked row-for-row against `01_Index` -- see README's
+  "Validated against the real workbook" section and `tools/validate_import.py`.
+- **CRUD / quarterly entry** (phase 3): weight validation, RAG computation,
+  Quarterly Entry sidebar with ATR-required-on-Amber/Red, audit logging.
 
-## Not built yet (phases 3–7 of the plan)
+## Built, but first-pass and likely to need correction
 
-1. **Roll-up engine** (phase 4): KPI → KRA → Vertical → Office → Cluster →
-   Goal → Pillar achievement computation, using `Rolls Up From` links and the
-   Goal `Owner Weight %` split rather than an even split. This is explicitly
-   called out as "the part most likely to need correcting once real people
-   check the numbers" — build it as an isolated, unit-testable calculation
-   layer before wiring it into any dashboard.
-2. **Dashboards & drill-down** (phase 5): VC/Institutional, Cluster, Office,
-   Goal, and individual-accountability views, plus the Pillar → Goal →
-   Cluster → Office → Vertical → KRA → KPI → Quarterly Milestone → Actual →
-   ATR click-through. Depends on (1).
-3. **Escalation & notifications** (phase 6): auto-flag Red KPIs, ATRs open
-   past quarter-close, missed milestones, weight totals drifting from 100
-   (the `onEdit` toast in `99_Triggers.gs` is a start, but not a real
-   notification/escalation system); per-KPI `Frequency`-aware reminders to
-   Owners/Responsible Officers/Informed parties.
-4. **Reporting & Excel export** (spec section 11): Quarterly Scorecard
-   Report, Cluster/VC Review Pack, Owner Performance Report, and export back
-   to the original 38-tab structure for continuity with existing
-   stakeholders.
-5. **Actions/milestone UI**: the `Actions` sheet schema exists (3.8) but has
-   no entry screen yet.
-6. **Real-workbook validation**: re-run the import against the actual
-   SRMAP_KRA-KPI_AY26-27 workbook once available, and reconcile
-   `Import_Log` row counts against `01_Index`'s own KPI-count column per
-   office — this was the explicit gate before moving past phase 2.
+These are exactly the parts the original build plan flagged as needing
+correction once real people check the numbers ("the part most likely to
+need correcting"). Each is isolated and documented so it's fixable without
+touching the rest of the system.
 
-## Suggested order for the next session
+- **Roll-up engine** (`08_RollupEngine.gs`, phase 4). The real workbook's
+  quarterly targets are frequently narrative text, not numbers, even on
+  numeric-unit KPIs -- so per-KPI achievement % falls back through
+  `Score (Actual vs Target)` → numeric Q4 Actual/Target → RAG-status score
+  (Green=100/Amber=70/Red=40/Grey=0), in that order. Cluster roll-up
+  averages the named "Rolls Up From" offices equally (no finer split is in
+  the source data); Goal roll-up defaults to an even owner/contributor split
+  until an admin sets `Owner Weight %` on the Goals sheet. **Before trusting
+  any Achievement % number, have someone who owns a KPI check it against
+  what they'd expect.**
+- **Escalation & notifications** (`10_Escalation.gs`, phase 6). Due-date
+  reminders key off four Config-configurable quarter-close dates for every
+  KPI, because the workbook only ever carries four milestone checkpoints
+  regardless of a KPI's own Frequency (a "Monthly" or "Per exam cycle" KPI
+  still only has Q1-Q4 slots to be measured against) -- a true per-Frequency
+  calendar would need the workbook itself to carry more checkpoints.
+  Notifications need real email addresses: fill in the `Office_Contacts`
+  sheet (Office Code → email) -- until then, `notifyKpiOwners()` logs
+  "SKIPPED - no contact email" per KPI instead of silently doing nothing.
+- **Dashboards** (`09_Dashboards.gs`, phase 5): Office/Goal/My KPIs use live
+  `QUERY()` formulas; VC/Cluster are script-computed snapshots refreshed by
+  "Refresh Dashboards". Multi-dimension filtering (KRA Type + Metric Type +
+  Indicator Nature + Status all at once) is left to Sheets' own native
+  filter views (Data > Create a filter) over the QUERY output rather than a
+  custom filter UI -- deliberate, not a shortcut, but worth knowing.
+- **Reporting/export** (`11_Reporting.gs`, phase 7): `regenerateAllScorecardTabs()`
+  rebuilds one tab per Tier 0/1/2 scorecard from canonical data using the
+  canonical column set/order, not a byte-for-byte reproduction of the
+  original workbook's exact header wording and formatting. After
+  regenerating, File > Download > Microsoft Excel is the actual export step
+  (native Sheets capability, no custom code needed for it).
 
-Roll-up engine first (it's pure calculation, testable without any UI), then
-dashboards on top of it, then escalation/notifications, then reporting/export
-— matching the phase order in the original build plan.
+## Not built at all
+
+- **Actions/milestone UI**: the `Actions` sheet schema exists (§3.8) but has
+  no entry screen. Reports reference it (e.g. Owner Performance Report's
+  "open actions") but it'll be empty until KPI Owners have somewhere to log
+  actions against a KPI.
+- **Per-KPI configurable RAG thresholds**: thresholds are global (Config
+  sheet), not per-KPI as the spec's stretch goal describes.
+- **Fine-grained per-recipient RACI notification routing**: `Office_Contacts`
+  is one email per role per OFFICE, not per named individual in the R/A/C/I
+  columns -- those columns are free text (e.g. "Vice-Chancellor; Pro
+  Vice-Chancellor; Governing Council") and aren't parsed into addressable
+  recipients.
+
+## First real run checklist
+
+Nothing in this repo has executed inside an actual Google Sheet yet (this
+build environment has no Google account access -- see `DEPLOY.md`). Before
+treating any of it as production-ready:
+
+1. `clasp push` into a real Google Sheet, run "1. Setup Schema", then
+   "3. Import Real Workbook..." against the actual file.
+2. Compare `Import_Log` row counts against what `tools/validate_import.py`
+   predicted (they should match exactly -- if not, something about the live
+   Sheets environment is behaving differently than openpyxl did).
+3. Run "4. Validate Weights" and fix any FAIL rows before going further.
+4. Run "7. Recompute Roll-up Achievement %" and have a handful of KPI
+   Owners sanity-check their own office's number.
+5. Pilot with one office + one cluster for a live quarter (per the original
+   build plan's step 7) before rolling out to all 30 offices.
