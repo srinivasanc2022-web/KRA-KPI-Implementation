@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <style>
+    body { font-family: Arial, sans-serif; font-size: 13px; padding: 8px; color: #202124; }
+    label { display: block; margin-top: 10px; font-weight: bold; }
+    select, input, textarea { width: 100%; box-sizing: border-box; padding: 5px; margin-top: 3px; font-size: 13px; }
+    textarea { min-height: 60px; }
+    button { margin-top: 12px; padding: 8px 14px; background: #1c4587; color: #fff; border: none; border-radius: 4px; cursor: pointer; }
+    button:disabled { background: #999; cursor: not-allowed; }
+    #status { margin-top: 10px; padding: 8px; border-radius: 4px; display: none; }
+    #status.ok { background: #d9ead3; display: block; }
+    #status.error { background: #f4cccc; display: block; }
+    .rag { font-weight: bold; }
+    .rag-Green { color: #38761d; }
+    .rag-Amber { color: #b45f06; }
+    .rag-Red { color: #cc0000; }
+    .rag-Grey { color: #666; }
+    #kpiInfo { background: #f3f6fb; padding: 8px; border-radius: 4px; margin-top: 8px; font-size: 12px; }
+    #atrBlock { display: none; }
+    hr { margin: 16px 0; border: none; border-top: 1px solid #ddd; }
+  </style>
+</head>
+<body>
+  <h3>Quarterly KPI Entry</h3>
+
+  <label for="office">Office</label>
+  <select id="office"><option value="">All</option></select>
+
+  <label for="kpi">KPI</label>
+  <select id="kpi"><option value="">Loading...</option></select>
+
+  <div id="kpiInfo"></div>
+
+  <label for="quarter">Quarter</label>
+  <select id="quarter">
+    <option value="Q1">Q1</option>
+    <option value="Q2">Q2</option>
+    <option value="Q3">Q3</option>
+    <option value="Q4">Q4</option>
+  </select>
+
+  <div id="numericBlock">
+    <label for="actual">Actual</label>
+    <input type="text" id="actual" placeholder="e.g. 9">
+  </div>
+
+  <div id="manualStatusBlock" style="display:none">
+    <label for="manualStatus">Status (manual - unit is not automatically computable)</label>
+    <select id="manualStatus">
+      <option value="Green">Green</option>
+      <option value="Amber">Amber</option>
+      <option value="Red">Red</option>
+      <option value="Grey">Grey</option>
+    </select>
+  </div>
+
+  <div id="atrBlock">
+    <label for="atr">ATR / Corrective Action Note (required for Amber or Red)</label>
+    <textarea id="atr" placeholder="What's driving the gap, and what's the remediation plan?"></textarea>
+  </div>
+
+  <button id="submitBtn" onclick="submitEntry()">Save</button>
+  <div id="status"></div>
+
+  <hr>
+  <p style="color:#666">Computed status uses the KPI's Unit and the quarter's Milestone Target against configurable thresholds (Config sheet). Band/Grade-unit KPIs always require manual status entry.</p>
+
+  <script>
+    let kpis = [];
+
+    function loadOffices() {
+      google.script.run.withSuccessHandler(function (offices) {
+        const sel = document.getElementById('office');
+        offices.forEach(function (o) {
+          const opt = document.createElement('option');
+          opt.value = o; opt.textContent = o;
+          sel.appendChild(opt);
+        });
+      }).listOfficesForEntry();
+    }
+
+    function loadKpis(officeFilter) {
+      const sel = document.getElementById('kpi');
+      sel.innerHTML = '<option value="">Loading...</option>';
+      google.script.run.withSuccessHandler(function (list) {
+        kpis = list;
+        sel.innerHTML = '<option value="">Select a KPI...</option>';
+        list.forEach(function (k) {
+          const opt = document.createElement('option');
+          opt.value = k.kpiId;
+          opt.textContent = k.office + ' | ' + k.kra + ' | ' + k.kpi;
+          sel.appendChild(opt);
+        });
+        renderKpiInfo();
+      }).listKpisForEntry(officeFilter || null);
+    }
+
+    function currentKpi() {
+      const id = document.getElementById('kpi').value;
+      return kpis.filter(function (k) { return k.kpiId === id; })[0];
+    }
+
+    function renderKpiInfo() {
+      const k = currentKpi();
+      const infoDiv = document.getElementById('kpiInfo');
+      const manualBlock = document.getElementById('manualStatusBlock');
+      const numericBlock = document.getElementById('numericBlock');
+      if (!k) { infoDiv.innerHTML = ''; return; }
+
+      const q = document.getElementById('quarter').value;
+      const target = k[q.toLowerCase() + 't'];
+      const actual = k[q.toLowerCase() + 'a'];
+      const status = k[q.toLowerCase() + 's'];
+
+      infoDiv.innerHTML =
+        '<div><b>Owner:</b> ' + (k.owner || '-') + ' &nbsp; <b>Unit:</b> ' + (k.unit || '-') + ' &nbsp; <b>Frequency:</b> ' + (k.frequency || '-') + '</div>' +
+        '<div><b>' + q + ' Milestone Target:</b> ' + (target === '' ? '-' : target) + ' &nbsp; <b>Current Actual:</b> ' + (actual === '' ? '-' : actual) + '</div>' +
+        '<div><b>Current Status:</b> <span class="rag rag-' + (status || 'Grey') + '">' + (status || 'Not entered') + '</span></div>';
+
+      document.getElementById('actual').value = actual || '';
+
+      const isManualUnit = k.unit === 'Band' || k.unit === 'Grade';
+      manualBlock.style.display = isManualUnit ? 'block' : 'none';
+      numericBlock.style.display = isManualUnit ? 'none' : 'block';
+    }
+
+    function toggleAtrVisibility() {
+      // Always show the ATR box once a KPI is selected -- server enforces the
+      // hard requirement on Amber/Red, but showing it up front avoids a
+      // save-then-retry round trip for KPI Owners who already know they're behind.
+      document.getElementById('atrBlock').style.display = currentKpi() ? 'block' : 'none';
+    }
+
+    function submitEntry() {
+      const k = currentKpi();
+      const statusDiv = document.getElementById('status');
+      if (!k) { showStatus('error', 'Select a KPI first.'); return; }
+
+      const quarter = document.getElementById('quarter').value;
+      const atr = document.getElementById('atr').value;
+      const isManualUnit = k.unit === 'Band' || k.unit === 'Grade';
+      const btn = document.getElementById('submitBtn');
+      btn.disabled = true;
+
+      const onResult = function (result) {
+        btn.disabled = false;
+        if (result.ok) {
+          showStatus('ok', result.message + (result.status ? (' Status: ' + result.status) : ''));
+          loadKpis(document.getElementById('office').value);
+        } else {
+          showStatus('error', result.message);
+        }
+      };
+      const onError = function (err) {
+        btn.disabled = false;
+        showStatus('error', 'Error: ' + err.message);
+      };
+
+      if (isManualUnit) {
+        const status = document.getElementById('manualStatus').value;
+        google.script.run.withSuccessHandler(onResult).withFailureHandler(onError)
+          .submitManualStatus(k.kpiId, quarter, status, atr);
+      } else {
+        const actual = document.getElementById('actual').value;
+        google.script.run.withSuccessHandler(onResult).withFailureHandler(onError)
+          .submitQuarterlyActual(k.kpiId, quarter, actual, atr);
+      }
+    }
+
+    function showStatus(cls, msg) {
+      const div = document.getElementById('status');
+      div.className = cls;
+      div.textContent = msg;
+    }
+
+    document.getElementById('office').addEventListener('change', function (e) { loadKpis(e.target.value); });
+    document.getElementById('kpi').addEventListener('change', function () { renderKpiInfo(); toggleAtrVisibility(); });
+    document.getElementById('quarter').addEventListener('change', function () { renderKpiInfo(); });
+
+    loadOffices();
+    loadKpis('');
+  </script>
+</body>
+</html>
